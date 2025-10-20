@@ -1,0 +1,7 @@
+eegdash>=0.3.8
+braindecode
+jupyter
+lightning
+ipykernel
+
+## you need to download torch from here: https://pytorch.org/get-started/locally/
