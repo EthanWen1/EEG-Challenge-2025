@@ -27,7 +27,7 @@ To run the starter code, follow these steps:
 5. **Run the Starter Code**  
    You can run the starter code using:
    ```bash
-   python challenege_1.py
+   python challenge_1.py
     ```
    and
    ```bash
