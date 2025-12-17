@@ -34,9 +34,10 @@
 
 from pathlib import Path
 import torch
+import torch.nn as nn
 from braindecode.datasets import BaseConcatDataset
 from braindecode.preprocessing import preprocess, Preprocessor, create_windows_from_events
-from braindecode.models import EEGNeX
+from braindecode.models import EEGNetv4
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.utils import check_random_state
@@ -216,12 +217,84 @@ test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False, num_wor
 # %% Build the model [code]
 # For any braindecode model, you can initialize only inputing the signal related parameters
 # You can use any Pytorch module that you want here.
-model = EEGNeX(
+
+initial_model = EEGNetv4(
     n_chans=129,      # 129 channels
     n_outputs=1,      # 1 output for regression
     n_times=200,      # 2 seconds
     sfreq=100,        # sample frequency 100 Hz
+    #F1=16,
+    #D=4,
+    #F2=64,
 )
+
+
+class FeatureExtractor(nn.Module):
+    def __init__(self, model: nn.Module):
+        super().__init__()
+        self.backbone = model
+        
+        # Remove the final output layer
+        self.backbone.final_layer = nn.Identity()
+        self.backbone.classifier = nn.Identity()
+
+    def forward(self, x):
+
+        feats = self.backbone(x)
+        print(f"Feature extractor output shape: {feats.shape}")
+        feats = feats.squeeze(2)    
+        #if feats.dim() == 4:  # If output has extra dimension
+        #    feats = feats.squeeze(-1)
+
+        return feats
+
+
+class HybridCNNLSTM(nn.Module):
+    def __init__(self, feature_extractor: nn.Module, input_size, n_classes):
+        super(HybridCNNLSTM, self).__init__()
+        
+        # 1. Use the feature extractor instead of CNN
+        self.feature_extractor = feature_extractor
+
+        # 2. The Temporal Processor (LSTM)
+        # input_size must match the out_channels from the last CNN layer (64)
+        self.lstm = nn.LSTM(input_size, hidden_size=128, batch_first=True)
+        
+        # 3. The Classifier (Fully Connected)
+        self.fc = nn.Linear(128, n_classes)
+
+    def forward(self, x):
+        # x shape: (Batch, n_channels, time_points)
+
+        # --- FEATURE EXTRACTION STEP ---
+        x = self.feature_extractor(x)
+        # Current shape: (Batch, 64, reduced_time_points)
+        
+        # --- THE BRIDGE (Crucial Step) ---
+        # LSTM expects: (Batch, Sequence_Length, Features)
+        # Our CNN output is: (Batch, Features, Sequence_Length)
+        # We must swap the last two dimensions.
+        x = x.permute(0, 2, 1) 
+        # New shape: (Batch, reduced_time_points, 64)
+        
+        # --- LSTM STEP ---
+        # lstm_out shape: (Batch, Seq_Len, Hidden_Size)
+        # hidden shape: (num_layers, Batch, Hidden_Size)
+        lstm_out, (hidden, cell) = self.lstm(x)
+        
+        # We usually take the output of the *last* time step for classification
+        last_time_step = lstm_out[:, -1, :]
+        
+        # --- CLASSIFICATION STEP ---
+        out = self.fc(last_time_step)
+        return out
+
+input_test = torch.randn(1, 129, 400)  # (Batch Size=1, Channels=129, Time Points=400)
+feature_extractor = FeatureExtractor(initial_model)
+features = feature_extractor(input_test)
+print(f"Extracted features shape: {features.shape}")
+input_size = features.shape[1]  # Number of features after extraction
+model = HybridCNNLSTM(feature_extractor, input_size, n_classes=1)
 
 print(model)
 model.to(device)
