@@ -241,7 +241,7 @@ class FeatureExtractor(nn.Module):
     def forward(self, x):
 
         feats = self.backbone(x)
-        #print(f"Feature extractor output shape: {feats.shape}")
+        print(f"Feature extractor output shape: {feats.shape}")
         feats = feats.squeeze(2)    
         #if feats.dim() == 4:  # If output has extra dimension
         #    feats = feats.squeeze(-1)
@@ -299,154 +299,11 @@ model = HybridCNNLSTM(feature_extractor, input_size, n_classes=1)
 print(model)
 model.to(device)
 
-
-# %% Define training functions [code]
-def train_one_epoch(
-    dataloader: DataLoader,
-    model: Module,
-    loss_fn,
-    optimizer,
-    scheduler: Optional[LRScheduler],
-    epoch: int,
-    device,
-    print_batch_stats: bool = True,
-):
-    model.train()
-
-    total_loss = 0.0
-    sum_sq_err = 0.0
-    n_samples = 0
-
-    progress_bar = tqdm(
-        enumerate(dataloader), total=len(dataloader), disable=not print_batch_stats
-    )
-
-    for batch_idx, batch in progress_bar:
-        # Support datasets that may return (X, y) or (X, y, ...)
-        X, y = batch[0], batch[1]
-        X, y = X.to(device).float(), y.to(device).float()
-
-        optimizer.zero_grad(set_to_none=True)
-        preds = model(X)
-        loss = loss_fn(preds, y)
-        loss.backward()
-        optimizer.step()
-
-        total_loss += loss.item()
-
-        # Flatten to 1D for regression metrics and accumulate squared error
-        preds_flat = preds.detach().view(-1)
-        y_flat = y.detach().view(-1)
-        sum_sq_err += torch.sum((preds_flat - y_flat) ** 2).item()
-        n_samples += y_flat.numel()
-
-        if print_batch_stats:
-            running_rmse = (sum_sq_err / max(n_samples, 1)) ** 0.5
-            progress_bar.set_description(
-                f"Epoch {epoch}, Batch {batch_idx + 1}/{len(dataloader)}, "
-                f"Loss: {loss.item():.6f}, RMSE: {running_rmse:.6f}"
-            )
-
-    if scheduler is not None:
-        scheduler.step()
-
-    avg_loss = total_loss / len(dataloader)
-    rmse = (sum_sq_err / max(n_samples, 1)) ** 0.5
-    return avg_loss, rmse
-
-@torch.no_grad()
-def valid_model(
-    dataloader: DataLoader,
-    model: Module,
-    loss_fn,
-    device,
-    print_batch_stats: bool = True,
-):
-    model.eval()
-
-    total_loss = 0.0
-    sum_sq_err = 0.0
-    n_batches = len(dataloader)
-    n_samples = 0
-
-    iterator = tqdm(
-        enumerate(dataloader),
-        total=n_batches,
-        disable=not print_batch_stats
-    )
-
-    for batch_idx, batch in iterator:
-        # Supports (X, y) or (X, y, ...)
-        X, y = batch[0], batch[1]
-        X, y = X.to(device).float(), y.to(device).float()
-
-        preds = model(X)
-        batch_loss = loss_fn(preds, y).item()
-        total_loss += batch_loss
-
-        preds_flat = preds.detach().view(-1)
-        y_flat = y.detach().view(-1)
-        sum_sq_err += torch.sum((preds_flat - y_flat) ** 2).item()
-        n_samples += y_flat.numel()
-
-        if print_batch_stats:
-            running_rmse = (sum_sq_err / max(n_samples, 1)) ** 0.5
-            iterator.set_description(
-                f"Val Batch {batch_idx + 1}/{n_batches}, "
-                f"Loss: {batch_loss:.6f}, RMSE: {running_rmse:.6f}"
-            )
-
-    avg_loss = total_loss / n_batches if n_batches else float("nan")
-    rmse = (sum_sq_err / max(n_samples, 1)) ** 0.5
-
-    print(f"Val RMSE: {rmse:.6f}, Val Loss: {avg_loss:.6f}\n")
-    return avg_loss, rmse
-
-# %% Train the model [code]
-lr = 1E-3
-weight_decay = 1E-5
-n_epochs = 100
-early_stopping_patience = 50
-
-optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_epochs - 1)
-loss_fn = torch.nn.MSELoss()
-
-patience = 5
-min_delta = 1e-4
-best_rmse = float("inf")
-epochs_no_improve = 0
-best_state, best_epoch = None, None
-
-for epoch in range(1, n_epochs + 1):
-    print(f"Epoch {epoch}/{n_epochs}: ", end="")
-
-    train_loss, train_rmse = train_one_epoch(
-        train_loader, model, loss_fn, optimizer, scheduler, epoch, device
-    )
-    val_loss, val_rmse = valid_model(test_loader, model, loss_fn, device)
-
-    print(
-        f"Train RMSE: {train_rmse:.6f}, "
-        f"Average Train Loss: {train_loss:.6f}, "
-        f"Val RMSE: {val_rmse:.6f}, "
-        f"Average Val Loss: {val_loss:.6f}"
-    )
-
-    if val_rmse < best_rmse - min_delta:
-        best_rmse = val_rmse
-        best_state = copy.deepcopy(model.state_dict())
-        best_epoch = epoch
-        epochs_no_improve = 0
-    else:
-        epochs_no_improve += 1
-        if epochs_no_improve >= patience:
-            print(f"Early stopping at epoch {epoch}. Best Val RMSE: {best_rmse:.6f} (epoch {best_epoch})")
-            break
-
-if best_state is not None:
-    model.load_state_dict(best_state)
-
-# %% Save the model [code]
-torch.save(model.state_dict(), "weights_challenge_1.pt")
-print("Model saved as 'weights_challenge_1.pt'")
+print("Python version:", sys.version)
+print("Torch version:", torch.__version__)
+print("Torch CUDA available:", torch.cuda.is_available())
+print("Braindecode version:", braindecode.__version__)
+print("MNE version:", mne.__version__)
+print("scikit-learn version:", sklearn.__version__)
+print("tqdm version:", tqdm.__version__)
+print("joblib version:", joblib.__version__)
